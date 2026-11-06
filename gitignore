@@ -1,0 +1,27 @@
+# Ambientes virtuais
+env/
+venv/
+.venv/
+
+# Configuração local (string de conexão, senhas) — versionar só o .env.example
+.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Logs do worker e das execuções
+logs/
+*.log
+
+# IDE / sistema
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store
