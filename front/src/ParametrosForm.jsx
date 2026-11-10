@@ -33,7 +33,7 @@ function validar(campos, obj, agenda) {
 }
 
 /**
- * Formulário de parâmetros montado a partir do cadastro do robô (tabela robo_parametro).
+ * Formulário de parâmetros montado a partir do cadastro do robô (tabela PY_RoboParametro).
  * onChange({ obj, erro }) é chamado sempre que algo muda.
  * agenda=true: datas com padrão HOJE ficam vazias (o robô calcula a data em cada execução).
  */

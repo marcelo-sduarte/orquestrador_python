@@ -28,7 +28,7 @@ Teste rápido no navegador: http://localhost:3001/api/robos
 (`DB_CONN_STR`), via pacote `msnodesqlv8`. Se ele não instalar ou preferir usuário SQL,
 preencha `DB_USER`/`DB_PASSWORD` no `.env` (precisa de TCP/IP + SQL Browser habilitados no SQLEXPRESS).
 
-> A API lê o arquivo de log apontado em `fila_execucao.log_arquivo`, então precisa rodar
+> A API lê o arquivo de log apontado em `PY_FilaExecucao.log_arquivo`, então precisa rodar
 > na mesma máquina do worker (ou ter acesso à pasta de logs).
 
 ## 2. Front
@@ -47,7 +47,7 @@ Abra http://localhost:5173
 - **log** — abre o detalhe da execução:
   - resumo (origem, início/fim, duração, código de saída, máquina/PID) e os parâmetros enviados;
   - **resultado do bootstrap** em destaque (✓ Sucesso / ✕ Falha + mensagem) e a **resposta do robô** formatada
-    (coluna `fila_execucao.resultado` — rode `sql/migracoes/05_resultado_execucao.sql`);
+    (coluna `PY_FilaExecucao.resultado` — rode `sql/migracoes/05_resultado_execucao.sql`);
   - log com número de linha e cores (erros em vermelho, avisos em amarelo, linha final em verde),
     **busca** com destaque, filtro **só avisos e erros**, **copiar** e **baixar .log**;
   - enquanto a execução roda, tudo atualiza a cada 2 s e acompanha o final.
@@ -74,7 +74,7 @@ Abra http://localhost:5173
 - Ativar/desativar robô, ver quantos estão rodando/na fila e o último status.
 - **▶ Executar** — abre o formulário com as informações cadastradas e coloca na fila.
 
-## Parâmetros amigáveis (tabela `robo_parametro`)
+## Parâmetros amigáveis (tabela `PY_RoboParametro`)
 
 Em vez de digitar JSON, cada robô tem seus campos cadastrados (pela aba **Robôs**) e o front monta o formulário.
 A tabela já vem no `sql/00_criar_tabelas.sql` (banco existente: `sql/migracoes/03_robo_parametro.sql`).
@@ -93,8 +93,8 @@ A tabela já vem no `sql/00_criar_tabelas.sql` (banco existente: `sql/migracoes/
 
 Exemplo:
 ```sql
-DECLARE @eco INT = (SELECT id FROM robo WHERE nome = 'eco_bot');
-INSERT INTO robo_parametro (robo_id, chave, rotulo, tipo, obrigatorio, padrao, opcoes, ajuda, ordem) VALUES
+DECLARE @eco INT = (SELECT id FROM PY_Robo WHERE nome = 'eco_bot');
+INSERT INTO PY_RoboParametro (robo_id, chave, rotulo, tipo, obrigatorio, padrao, opcoes, ajuda, ordem) VALUES
  (@eco, 'data',        N'Data de referência', 'data',     0, 'HOJE',  NULL, N'Dia a processar', 1),
  (@eco, 'cliente',     N'Cliente',            'lista',    1, 'TODOS', N'TODOS=Todos;TAESA=Taesa', NULL, 2),
  (@eco, 'reprocessar', N'Reprocessar',        'booleano', 0, 'false', NULL, NULL, 3);
@@ -128,7 +128,7 @@ Regras:
 | GET | `/api/robos/:id` | Robô + campos (tela de edição) |
 | POST | `/api/robos` | Cadastra robô: `{ nome, max_concorrencia, timeout_min, ativo, campos: [...] }` |
 | PUT | `/api/robos/:id` | Atualiza robô e substitui os campos |
-| GET | `/api/robos/:id/parametros` | Campos cadastrados em `robo_parametro` |
+| GET | `/api/robos/:id/parametros` | Campos cadastrados em `PY_RoboParametro` |
 | POST | `/api/robos/:id/executar` | `{ "parametros": "{...}", "solicitado_por": "nome" }` → `{ id }` |
 | GET | `/api/execucoes?status=&robo_id=&limite=` | Lista de execuções |
 | GET | `/api/execucoes/:id` | Detalhe da execução (inclui `resultado` do bootstrap) |

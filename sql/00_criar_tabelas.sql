@@ -1,8 +1,10 @@
 /* ============================================================================
    Orquestrador de Robôs — criação do banco (estado atual completo)
 
+   Tabelas com prefixo PY_ (identificação fácil no ambiente).
+
    Use este script para um banco NOVO. Para um banco que já existe e foi criado
-   com versões anteriores, rode os scripts de sql/migracoes/ em ordem (01 → 05).
+   com versões anteriores, rode os scripts de sql/migracoes/ em ordem (01 → 06).
 
    Pode ser rodado mais de uma vez: só cria o que ainda não existe.
    ============================================================================ */
@@ -12,10 +14,10 @@ USE RPA;
 GO
 
 /* ----------------------------------------------------------------------------
-   robo — cadastro dos robôs
+   PY_Robo — cadastro dos robôs
    ---------------------------------------------------------------------------- */
-IF OBJECT_ID('dbo.robo') IS NULL
-CREATE TABLE dbo.robo (
+IF OBJECT_ID('dbo.PY_Robo') IS NULL
+CREATE TABLE dbo.PY_Robo (
     id                  INT IDENTITY PRIMARY KEY,
     nome                VARCHAR(100)  UNIQUE,          -- "nomebot" do bootstrap: pasta bots\<nome>
     ativo               BIT           DEFAULT 1,       -- 0 = não executa (nem manual, nem agenda)
@@ -26,33 +28,33 @@ CREATE TABLE dbo.robo (
 GO
 
 /* ----------------------------------------------------------------------------
-   robo_parametro — informações pedidas no formulário ao executar/agendar
+   PY_RoboParametro — informações pedidas no formulário ao executar/agendar
    ---------------------------------------------------------------------------- */
-IF OBJECT_ID('dbo.robo_parametro') IS NULL
-CREATE TABLE dbo.robo_parametro (
+IF OBJECT_ID('dbo.PY_RoboParametro') IS NULL
+CREATE TABLE dbo.PY_RoboParametro (
     id          INT IDENTITY PRIMARY KEY,
-    robo_id     INT           NOT NULL REFERENCES dbo.robo(id) ON DELETE CASCADE,
+    robo_id     INT           NOT NULL REFERENCES dbo.PY_Robo(id) ON DELETE CASCADE,
     chave       VARCHAR(50)   NOT NULL,                -- nome da chave no JSON (o que o robô lê)
     rotulo      NVARCHAR(100) NOT NULL,                -- texto exibido ao usuário
     tipo        VARCHAR(20)   NOT NULL
-                CONSTRAINT CK_robo_parametro_tipo CHECK (tipo IN ('texto','numero','data','booleano','lista')),
+                CONSTRAINT CK_PY_RoboParametro_tipo CHECK (tipo IN ('texto','numero','data','booleano','lista')),
     obrigatorio BIT           NOT NULL DEFAULT 0,
     padrao      NVARCHAR(200) NULL,                    -- valor inicial; para data, 'HOJE'
     opcoes      NVARCHAR(MAX) NULL,                    -- tipo lista: 'valor=Rótulo;valor2=Rótulo 2'
     ajuda       NVARCHAR(300) NULL,                    -- dica exibida abaixo do campo
     ordem       INT           NOT NULL DEFAULT 0,
-    CONSTRAINT UQ_robo_parametro UNIQUE (robo_id, chave)
+    CONSTRAINT UQ_PY_RoboParametro UNIQUE (robo_id, chave)
 );
 GO
 
 /* ----------------------------------------------------------------------------
-   agendamento — quando cada robô roda
+   PY_Agendamento — quando cada robô roda
    Forma amigável (dias / horario / intervalo) ou cron (tem prioridade se preenchido)
    ---------------------------------------------------------------------------- */
-IF OBJECT_ID('dbo.agendamento') IS NULL
-CREATE TABLE dbo.agendamento (
+IF OBJECT_ID('dbo.PY_Agendamento') IS NULL
+CREATE TABLE dbo.PY_Agendamento (
     id               INT IDENTITY PRIMARY KEY,
-    robo_id          INT           REFERENCES dbo.robo(id),
+    robo_id          INT           REFERENCES dbo.PY_Robo(id),
     cron             VARCHAR(50)   NULL,               -- opcional/avançado: '30 6 1 * *'
     dias             VARCHAR(50)   NULL,               -- 'SEG-SEX', 'SEG,QUA,SEX', 'TODOS', 'FDS'
     horario          VARCHAR(20)   NULL,               -- '09:00' ou '08:00-18:00'
@@ -65,12 +67,12 @@ CREATE TABLE dbo.agendamento (
 GO
 
 /* ----------------------------------------------------------------------------
-   fila_execucao — cada execução (pedida, rodando ou finalizada)
+   PY_FilaExecucao — cada execução (pedida, rodando ou finalizada)
    ---------------------------------------------------------------------------- */
-IF OBJECT_ID('dbo.fila_execucao') IS NULL
-CREATE TABLE dbo.fila_execucao (
+IF OBJECT_ID('dbo.PY_FilaExecucao') IS NULL
+CREATE TABLE dbo.PY_FilaExecucao (
     id                  BIGINT IDENTITY PRIMARY KEY,
-    robo_id             INT            REFERENCES dbo.robo(id),
+    robo_id             INT            REFERENCES dbo.PY_Robo(id),
     origem              VARCHAR(20),                   -- 'MANUAL' | 'AGENDA'
     solicitado_por      VARCHAR(100),
     parametros          NVARCHAR(MAX),                 -- JSON do formulário
@@ -91,21 +93,21 @@ CREATE TABLE dbo.fila_execucao (
 GO
 
 -- Índice usado pelo claim da fila e pela contagem de execuções em andamento
-IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_fila_status_criado' AND object_id = OBJECT_ID('dbo.fila_execucao'))
-    CREATE INDEX IX_fila_status_criado ON dbo.fila_execucao (status, criado_em) INCLUDE (robo_id);
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_PY_FilaExecucao_status_criado' AND object_id = OBJECT_ID('dbo.PY_FilaExecucao'))
+    CREATE INDEX IX_PY_FilaExecucao_status_criado ON dbo.PY_FilaExecucao (status, criado_em) INCLUDE (robo_id);
 GO
 
 /* ----------------------------------------------------------------------------
    Opcional (recomendado): impedir JSON inválido gravado direto no banco
    ----------------------------------------------------------------------------
-ALTER TABLE dbo.fila_execucao ADD CONSTRAINT CK_fila_parametros_json
+ALTER TABLE dbo.PY_FilaExecucao ADD CONSTRAINT CK_PY_FilaExecucao_parametros_json
     CHECK (parametros IS NULL OR ISJSON(parametros) = 1);
-ALTER TABLE dbo.agendamento ADD CONSTRAINT CK_agenda_parametros_json
+ALTER TABLE dbo.PY_Agendamento ADD CONSTRAINT CK_PY_Agendamento_parametros_json
     CHECK (parametros IS NULL OR ISJSON(parametros) = 1);
 */
 
 -- Conferência: lista as tabelas e colunas criadas
 SELECT t.name AS tabela, c.column_id, c.name AS coluna, TYPE_NAME(c.user_type_id) AS tipo, c.max_length, c.is_nullable
 FROM sys.tables t JOIN sys.columns c ON c.object_id = t.object_id
-WHERE t.name IN ('robo', 'robo_parametro', 'agendamento', 'fila_execucao')
+WHERE t.name IN ('PY_Robo', 'PY_RoboParametro', 'PY_Agendamento', 'PY_FilaExecucao')
 ORDER BY t.name, c.column_id;

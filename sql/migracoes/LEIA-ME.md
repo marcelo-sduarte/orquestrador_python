@@ -12,3 +12,9 @@ Todos são idempotentes: rodar de novo não causa erro nem duplica nada.
 | `05_resultado_execucao.sql` | `fila_execucao.resultado` (JSON de retorno do bootstrap) |
 
 Para um banco **novo**, use só `../00_criar_tabelas.sql` (já contém tudo isso).
+| `06_renomear_tabelas_py.sql` | Renomeia as tabelas para `PY_Robo`, `PY_RoboParametro`, `PY_Agendamento`, `PY_FilaExecucao` (mantém os dados) |
+
+> Os scripts 01–05 usam os **nomes antigos** das tabelas (eram os nomes da época). Rode-os **antes** do 06.
+> Depois do 06, para um ambiente novo use só o `../00_criar_tabelas.sql`.
+>
+> **Ao rodar o 06:** pare o worker e a API antes, e suba os dois com o código atual depois.

@@ -39,11 +39,11 @@ class Job:
 SQL_CLAIM = """
 ;WITH candidato AS (
     SELECT TOP (1) f.*
-    FROM fila_execucao f WITH (UPDLOCK, READPAST, ROWLOCK)
-    JOIN robo r ON r.id = f.robo_id
+    FROM PY_FilaExecucao f WITH (UPDLOCK, READPAST, ROWLOCK)
+    JOIN PY_Robo r ON r.id = f.robo_id
     WHERE f.status = 'PENDENTE'
       AND r.ativo = 1
-      AND (SELECT COUNT(*) FROM fila_execucao e WITH (NOLOCK)
+      AND (SELECT COUNT(*) FROM PY_FilaExecucao e WITH (NOLOCK)
            WHERE e.robo_id = f.robo_id AND e.status = 'EXECUTANDO') < r.max_concorrencia
     ORDER BY f.criado_em
 )
@@ -63,14 +63,14 @@ def pegar_proximo_job() -> Job | None:
         row = cur.execute(SQL_CLAIM, CFG.worker_nome).fetchone()
         if not row:
             return None
-        r = cur.execute("SELECT nome, timeout_min, caminho_repositorio FROM robo WHERE id = ?",
+        r = cur.execute("SELECT nome, timeout_min, caminho_repositorio FROM PY_Robo WHERE id = ?",
                         row.robo_id).fetchone()
         return Job(row.id, row.robo_id, r.nome, row.parametros, r.timeout_min or 60, r.caminho_repositorio)
 
 
 def registrar_inicio(job_id: int, pid: int, log_arquivo: str) -> None:
     with conexao() as con:
-        con.execute("UPDATE fila_execucao SET pid = ?, log_arquivo = ? WHERE id = ?",
+        con.execute("UPDATE PY_FilaExecucao SET pid = ?, log_arquivo = ? WHERE id = ?",
                     pid, log_arquivo, job_id)
 
 
@@ -78,7 +78,7 @@ def heartbeat_e_cancelamento(job_id: int) -> bool:
     """Atualiza o heartbeat e devolve True se alguém pediu para cancelar."""
     with conexao() as con:
         row = con.execute(
-            "UPDATE fila_execucao SET heartbeat = SYSDATETIME() "
+            "UPDATE PY_FilaExecucao SET heartbeat = SYSDATETIME() "
             "OUTPUT inserted.cancelar_solicitado WHERE id = ?", job_id).fetchone()
         return bool(row and row[0])
 
@@ -88,7 +88,7 @@ def finalizar(job_id: int, status: str, exit_code: int | None, mensagem: str | N
     """resultado: JSON de retorno do bootstrap (status/mensagem/resposta), quando houver."""
     with conexao() as con:
         con.execute(
-            "UPDATE fila_execucao SET status = ?, exit_code = ?, mensagem = ?, resultado = ?, fim = SYSDATETIME() "
+            "UPDATE PY_FilaExecucao SET status = ?, exit_code = ?, mensagem = ?, resultado = ?, fim = SYSDATETIME() "
             "WHERE id = ?", status, exit_code, (mensagem or "")[:2000] or None, resultado, job_id)
 
 
@@ -96,7 +96,7 @@ def recuperar_orfaos() -> int:
     """Jobs EXECUTANDO cujo worker parou de mandar heartbeat (VM caiu, serviço morto)."""
     with conexao() as con:
         cur = con.execute(
-            "UPDATE fila_execucao SET status = 'ERRO', fim = SYSDATETIME(), "
+            "UPDATE PY_FilaExecucao SET status = 'ERRO', fim = SYSDATETIME(), "
             "mensagem = 'Órfão: worker parou de responder' "
             "WHERE status = 'EXECUTANDO' AND DATEDIFF(SECOND, heartbeat, SYSDATETIME()) > ?",
             CFG.orfao_apos_s)
@@ -107,7 +107,7 @@ def marcar_jobs_do_worker_como_interrompidos() -> int:
     """Na inicialização: o que estava EXECUTANDO neste worker morreu junto com ele."""
     with conexao() as con:
         cur = con.execute(
-            "UPDATE fila_execucao SET status = 'ERRO', fim = SYSDATETIME(), "
+            "UPDATE PY_FilaExecucao SET status = 'ERRO', fim = SYSDATETIME(), "
             "mensagem = 'Interrompido: worker reiniciado' "
             "WHERE status = 'EXECUTANDO' AND worker = ?", CFG.worker_nome)
         return cur.rowcount
@@ -122,8 +122,8 @@ def agendamentos_vencidos(agora: datetime):
     rows = cur.execute(
         "SELECT a.id, a.robo_id, a.cron, a.dias, a.horario, a.intervalo, "
         "       a.parametros, a.proxima_execucao "
-        "FROM agendamento a WITH (UPDLOCK, READPAST, ROWLOCK) "
-        "JOIN robo r ON r.id = a.robo_id "
+        "FROM PY_Agendamento a WITH (UPDLOCK, READPAST, ROWLOCK) "
+        "JOIN PY_Robo r ON r.id = a.robo_id "
         "WHERE a.ativo = 1 AND r.ativo = 1 "
         "  AND (a.proxima_execucao IS NULL OR a.proxima_execucao <= ?)", agora).fetchall()
     return con, cur, rows

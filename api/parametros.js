@@ -16,7 +16,7 @@ const numerico = (v) => /^-?\d+(\.\d+)?$/.test(String(v).trim());
 async function camposDoRobo(roboId) {
   const rows = await query(`
     SELECT chave, rotulo, tipo, obrigatorio, padrao, opcoes, ajuda
-    FROM robo_parametro WHERE robo_id = @robo ORDER BY ordem, id`, { robo: [sql.Int, roboId] });
+    FROM PY_RoboParametro WHERE robo_id = @robo ORDER BY ordem, id`, { robo: [sql.Int, roboId] });
   return rows.map((r) => ({ ...r, obrigatorio: !!r.obrigatorio, opcoes: parseOpcoes(r.opcoes) }));
 }
 

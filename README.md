@@ -9,7 +9,7 @@ O front (ou qualquer pessoa no SSMS) só grava pedidos no banco; o worker faz o 
 
 ```
             ┌──────────────┐        ┌───────────────────┐
-  Front ───▶│  API / SSMS  │──────▶│  fila_execucao     │◀──────┐
+  Front ───▶│  API / SSMS  │──────▶│  PY_FilaExecucao     │◀──────┐
             └──────────────┘ INSERT └───────────────────┘       │
                                          ▲        │ claim       │ INSERT
             ┌──────────────┐             │        ▼             │
@@ -41,7 +41,7 @@ orquestrador/
 ├── env/      ← venv do worker (não versionado)
 └── sql/
     ├── 00_criar_tabelas.sql    ← banco novo: cria todas as tabelas no estado atual
-    └── migracoes/              ← banco existente: ALTERs em ordem (01 → 05)
+    └── migracoes/              ← banco existente: ALTERs em ordem (01 → 06)
 ```
 
 Arquivos do worker (pasta `worker/`):
@@ -49,13 +49,13 @@ Arquivos do worker (pasta `worker/`):
 | Arquivo | Responsabilidade |
 |---|---|
 | `worker.py` | Loop principal. A cada ciclo: processa agenda, recupera órfãos, pega jobs da fila e os executa em threads. |
-| `agendador.py` | Lê `agendamento`, transforma horários vencidos em linhas na `fila_execucao` e calcula a próxima execução. |
+| `agendador.py` | Lê `PY_Agendamento`, transforma horários vencidos em linhas na `PY_FilaExecucao` e calcula a próxima execução. |
 | `executor.py` | Executa um job: inicia o `bootstrap.py`, grava log, envia heartbeat, trata cancelamento e timeout, mata a árvore de processos. |
 | `regra_agenda.py` | Interpreta `dias` / `horario` / `intervalo`, calcula a próxima execução e gera a descrição. |
 | `db.py` | Todas as queries SQL. Nenhum outro arquivo fala com o banco diretamente. |
 | `config.py` | Lê a configuração do `.env` / variáveis de ambiente. |
 | `.env` | Configuração da máquina (string de conexão, caminhos, intervalos). |
-| `sql/00_criar_tabelas.sql` | Cria `robo`, `robo_parametro`, `agendamento` e `fila_execucao` completas (banco novo). |
+| `sql/00_criar_tabelas.sql` | Cria `PY_Robo`, `PY_RoboParametro`, `PY_Agendamento` e `PY_FilaExecucao` completas (banco novo). |
 | `sql/migracoes/01..05` | Atualizam um banco criado com versões anteriores (ver `sql/migracoes/LEIA-ME.md`). |
 | `api/`, `front/` | Interface web de operação — instruções em `README-WEB.md`. |
 | `requirements.txt` | `pyodbc`, `croniter`, `psutil`, `python-dotenv`. |
@@ -64,7 +64,7 @@ Arquivos do worker (pasta `worker/`):
 
 ## 3. Tabelas
 
-### `robo` — cadastro dos robôs
+### `PY_Robo` — cadastro dos robôs
 | Coluna | Uso |
 |---|---|
 | `id` | Identificador |
@@ -73,7 +73,7 @@ Arquivos do worker (pasta `worker/`):
 | `max_concorrencia` | Quantas execuções simultâneas deste robô são permitidas (somando todos os workers) |
 | `timeout_min` | Tempo máximo de execução; ao passar, o processo é morto (`TIMEOUT`) |
 
-### `agendamento` — quando cada robô roda
+### `PY_Agendamento` — quando cada robô roda
 | Coluna | Uso |
 |---|---|
 | `robo_id` | Robô a executar |
@@ -105,10 +105,10 @@ Regras:
 - Formatos aceitos: dias `SEG`/`Segunda`/`seg` (sem diferença de acento ou maiúsculas); horas `8`, `8h`, `08:00`, `8h30`; janelas `8-18` ou `8h às 18h`.
 
 ```sql
-INSERT INTO agendamento (robo_id, dias, horario, intervalo, parametros, ativo)
-SELECT id, 'SEG-SEX', '08:00-18:00', '15min', '{}', 1 FROM robo WHERE nome = 'eco_bot';
+INSERT INTO PY_Agendamento (robo_id, dias, horario, intervalo, parametros, ativo)
+SELECT id, 'SEG-SEX', '08:00-18:00', '15min', '{}', 1 FROM PY_Robo WHERE nome = 'eco_bot';
 
-SELECT id, dias, horario, intervalo, descricao, proxima_execucao, ativo FROM agendamento;
+SELECT id, dias, horario, intervalo, descricao, proxima_execucao, ativo FROM PY_Agendamento;
 ```
 
 #### Cron (avançado)
@@ -119,7 +119,7 @@ Para regras que as colunas acima não cobrem (ex.: dia 1 de cada mês), preencha
 | `30 6 1 * *` | Dia 1 de cada mês às 06:30 |
 | `0 9 1-7 * 1` | Primeira segunda-feira do mês às 09:00 |
 
-### `fila_execucao` — cada execução (pedida, rodando ou finalizada)
+### `PY_FilaExecucao` — cada execução (pedida, rodando ou finalizada)
 | Coluna | Uso |
 |---|---|
 | `robo_id`, `parametros` | O que executar |
@@ -198,7 +198,7 @@ Variáveis de ambiente disponíveis para o bootstrap **e para o robô** (process
 
 | Variável | Conteúdo |
 |---|---|
-| `ORQ_EXECUCAO_ID` | `fila_execucao.id` — use para correlacionar com os logs do robô |
+| `ORQ_EXECUCAO_ID` | `PY_FilaExecucao.id` — use para correlacionar com os logs do robô |
 | `ORQ_ROBO` | Nome do robô |
 | `ORQ_PARAMS` | JSON de `parametros` |
 
@@ -211,7 +211,7 @@ Tudo que o robô imprimir vai para o log da execução.
 ### 6.2 Fluxo dos parâmetros
 ```
 agendamento.parametros ──(copiado a cada execução)──┐
-front / SSMS ─────────────────INSERT────────────────┴─▶ fila_execucao.parametros
+front / SSMS ─────────────────INSERT────────────────┴─▶ PY_FilaExecucao.parametros
         ──▶ worker valida JSON ──▶ ORQ_PARAMS ──▶ bootstrap ──▶ robô
 ```
 - `parametros` precisa ser **JSON válido**; se não for, o job vai para `ERRO` sem iniciar o robô.
@@ -246,23 +246,23 @@ Teste fora do orquestrador (Git Bash): `ORQ_PARAMS='{"data":"2026-11-01"}' pytho
 ### 6.4 Exemplos
 ```sql
 -- Padrões do robô (data = hoje)
-INSERT INTO fila_execucao (robo_id, origem, solicitado_por, parametros)
-SELECT id, 'MANUAL', 'marcelo', '{}' FROM robo WHERE nome = 'eco_bot';
+INSERT INTO PY_FilaExecucao (robo_id, origem, solicitado_por, parametros)
+SELECT id, 'MANUAL', 'marcelo', '{}' FROM PY_Robo WHERE nome = 'eco_bot';
 
 -- Reprocessar um dia
-INSERT INTO fila_execucao (robo_id, origem, solicitado_por, parametros)
-SELECT id, 'MANUAL', 'marcelo', '{"data":"2026-11-03","reprocessar":true}' FROM robo WHERE nome = 'eco_bot';
+INSERT INTO PY_FilaExecucao (robo_id, origem, solicitado_por, parametros)
+SELECT id, 'MANUAL', 'marcelo', '{"data":"2026-11-03","reprocessar":true}' FROM PY_Robo WHERE nome = 'eco_bot';
 
 -- Mesmo robô, dois clientes na agenda
-INSERT INTO agendamento (robo_id, dias, horario, intervalo, parametros, ativo)
-SELECT id, 'UTEIS', '08:00', NULL, '{"cliente":"TAESA"}', 1 FROM robo WHERE nome = 'eco_bot';
+INSERT INTO PY_Agendamento (robo_id, dias, horario, intervalo, parametros, ativo)
+SELECT id, 'UTEIS', '08:00', NULL, '{"cliente":"TAESA"}', 1 FROM PY_Robo WHERE nome = 'eco_bot';
 
 -- Consultar por parâmetro
-SELECT id, status, JSON_VALUE(parametros, '$.cliente') AS cliente FROM fila_execucao;
+SELECT id, status, JSON_VALUE(parametros, '$.cliente') AS cliente FROM PY_FilaExecucao;
 
 -- (Recomendado) bloquear JSON inválido no banco
-ALTER TABLE fila_execucao ADD CONSTRAINT CK_fila_parametros_json CHECK (parametros IS NULL OR ISJSON(parametros) = 1);
-ALTER TABLE agendamento  ADD CONSTRAINT CK_agenda_parametros_json CHECK (parametros IS NULL OR ISJSON(parametros) = 1);
+ALTER TABLE PY_FilaExecucao ADD CONSTRAINT CK_PY_FilaExecucao_parametros_json CHECK (parametros IS NULL OR ISJSON(parametros) = 1);
+ALTER TABLE PY_Agendamento  ADD CONSTRAINT CK_PY_Agendamento_parametros_json CHECK (parametros IS NULL OR ISJSON(parametros) = 1);
 ```
 
 ### 6.5 Boas práticas
@@ -278,26 +278,26 @@ ALTER TABLE agendamento  ADD CONSTRAINT CK_agenda_parametros_json CHECK (paramet
 
 ```sql
 -- Executar agora
-INSERT INTO fila_execucao (robo_id, origem, solicitado_por, parametros)
-SELECT id, 'MANUAL', 'marcelo', '{"data":"2026-11-06"}' FROM robo WHERE nome = 'eco_bot';
+INSERT INTO PY_FilaExecucao (robo_id, origem, solicitado_por, parametros)
+SELECT id, 'MANUAL', 'marcelo', '{"data":"2026-11-06"}' FROM PY_Robo WHERE nome = 'eco_bot';
 
 -- Cancelar uma execução em andamento
-UPDATE fila_execucao SET cancelar_solicitado = 1 WHERE id = 123 AND status = 'EXECUTANDO';
+UPDATE PY_FilaExecucao SET cancelar_solicitado = 1 WHERE id = 123 AND status = 'EXECUTANDO';
 
 -- Cancelar antes de começar
-UPDATE fila_execucao SET status = 'CANCELADO', fim = SYSDATETIME() WHERE id = 123 AND status = 'PENDENTE';
+UPDATE PY_FilaExecucao SET status = 'CANCELADO', fim = SYSDATETIME() WHERE id = 123 AND status = 'PENDENTE';
 
 -- Criar agendamento
-INSERT INTO agendamento (robo_id, cron, parametros, ativo)
-SELECT id, '0 9 * * 1-5', '{}', 1 FROM robo WHERE nome = 'eco_bot';
+INSERT INTO PY_Agendamento (robo_id, cron, parametros, ativo)
+SELECT id, '0 9 * * 1-5', '{}', 1 FROM PY_Robo WHERE nome = 'eco_bot';
 
 -- Pausar agendamento / robô
-UPDATE agendamento SET ativo = 0 WHERE id = 1;
-UPDATE robo SET ativo = 0 WHERE nome = 'eco_bot';
+UPDATE PY_Agendamento SET ativo = 0 WHERE id = 1;
+UPDATE PY_Robo SET ativo = 0 WHERE nome = 'eco_bot';
 
 -- Monitorar
 SELECT TOP 50 f.id, r.nome, f.origem, f.status, f.inicio, f.fim, f.exit_code, f.mensagem
-FROM fila_execucao f JOIN robo r ON r.id = f.robo_id
+FROM PY_FilaExecucao f JOIN PY_Robo r ON r.id = f.robo_id
 ORDER BY f.id DESC;
 ```
 
@@ -308,7 +308,7 @@ ORDER BY f.id DESC;
 | Variável | Padrão | Descrição |
 |---|---|---|
 | `ORQ_CONN_STR` | — | String ODBC. Local: `DRIVER={ODBC Driver 18 for SQL Server};SERVER=localhost\SQLEXPRESS;DATABASE=RPA;Trusted_Connection=yes;TrustServerCertificate=yes;` |
-| `ORQ_WORKER_NOME` | hostname | Nome gravado em `fila_execucao.worker` |
+| `ORQ_WORKER_NOME` | hostname | Nome gravado em `PY_FilaExecucao.worker` |
 | `ORQ_PYTHON` | — | Python **base** que roda o bootstrap (não o venv do orquestrador) |
 | `ORQ_BOOTSTRAP` | — | Caminho do `bootstrap.py` |
 | `ORQ_PASTA_LOGS` | — | Pasta dos logs (worker + um arquivo por execução) |
@@ -336,7 +336,8 @@ copy worker\.env.example worker\.env        &:: editar
 ```
 
 No SSMS, **banco novo**: rode `sql/00_criar_tabelas.sql` (troque `USE RPA;` pelo nome do seu banco).
-**Banco já existente**: rode `sql/migracoes/01` a `05`, em ordem — todos podem ser rodados mais de uma vez.
+**Banco já existente**: rode `sql/migracoes/01` a `06`, em ordem. O `06` renomeia as tabelas para `PY_...` —
+pare o worker e a API antes de rodá-lo (detalhes em `sql/migracoes/LEIA-ME.md`).
 
 ### Executar no console (teste)
 ```bat
@@ -386,7 +387,7 @@ sys.exit(p.get("exit", 0))
 
 No `.env`, aponte `ORQ_BOOTSTRAP` para ele e cadastre o robô de teste:
 ```sql
-INSERT INTO robo (nome, ativo, max_concorrencia, timeout_min) VALUES ('robo_teste', 1, 1, 2);
+INSERT INTO PY_Robo (nome, ativo, max_concorrencia, timeout_min) VALUES ('robo_teste', 1, 1, 2);
 ```
 
 | Teste | `parametros` / ação | Esperado |
@@ -405,45 +406,45 @@ Script dos testes:
 USE RPA;
 
 -- Sucesso
-INSERT INTO fila_execucao (robo_id, origem, solicitado_por, parametros)
-SELECT id, 'MANUAL', 'marcelo', '{"dorme":5}' FROM robo WHERE nome = 'robo_teste';
+INSERT INTO PY_FilaExecucao (robo_id, origem, solicitado_por, parametros)
+SELECT id, 'MANUAL', 'marcelo', '{"dorme":5}' FROM PY_Robo WHERE nome = 'robo_teste';
 
 -- Erro
-INSERT INTO fila_execucao (robo_id, origem, solicitado_por, parametros)
-SELECT id, 'MANUAL', 'marcelo', '{"exit":3}' FROM robo WHERE nome = 'robo_teste';
+INSERT INTO PY_FilaExecucao (robo_id, origem, solicitado_por, parametros)
+SELECT id, 'MANUAL', 'marcelo', '{"exit":3}' FROM PY_Robo WHERE nome = 'robo_teste';
 
 -- Cancelamento: dispara e, com o job EXECUTANDO, cancela o último em andamento
-INSERT INTO fila_execucao (robo_id, origem, solicitado_por, parametros)
-SELECT id, 'MANUAL', 'marcelo', '{"dorme":60}' FROM robo WHERE nome = 'robo_teste';
-UPDATE fila_execucao SET cancelar_solicitado = 1
-WHERE id = (SELECT MAX(id) FROM fila_execucao WHERE status = 'EXECUTANDO');
+INSERT INTO PY_FilaExecucao (robo_id, origem, solicitado_por, parametros)
+SELECT id, 'MANUAL', 'marcelo', '{"dorme":60}' FROM PY_Robo WHERE nome = 'robo_teste';
+UPDATE PY_FilaExecucao SET cancelar_solicitado = 1
+WHERE id = (SELECT MAX(id) FROM PY_FilaExecucao WHERE status = 'EXECUTANDO');
 
 -- Timeout
-INSERT INTO fila_execucao (robo_id, origem, solicitado_por, parametros)
-SELECT id, 'MANUAL', 'marcelo', '{"dorme":300}' FROM robo WHERE nome = 'robo_teste';
+INSERT INTO PY_FilaExecucao (robo_id, origem, solicitado_por, parametros)
+SELECT id, 'MANUAL', 'marcelo', '{"dorme":300}' FROM PY_Robo WHERE nome = 'robo_teste';
 
 -- Concorrência
-INSERT INTO fila_execucao (robo_id, origem, solicitado_por, parametros)
+INSERT INTO PY_FilaExecucao (robo_id, origem, solicitado_por, parametros)
 SELECT r.id, 'MANUAL', 'marcelo', p.parametros
-FROM robo r CROSS JOIN (VALUES ('{"dorme":5}'), ('{"dorme":15}'), ('{"dorme":50}')) p(parametros)
+FROM PY_Robo r CROSS JOIN (VALUES ('{"dorme":5}'), ('{"dorme":15}'), ('{"dorme":50}')) p(parametros)
 WHERE r.nome = 'robo_teste';
 
 -- JSON inválido (só funciona se a constraint ISJSON não estiver criada)
-INSERT INTO fila_execucao (robo_id, origem, solicitado_por, parametros)
-SELECT id, 'MANUAL', 'marcelo', 'abc' FROM robo WHERE nome = 'robo_teste';
+INSERT INTO PY_FilaExecucao (robo_id, origem, solicitado_por, parametros)
+SELECT id, 'MANUAL', 'marcelo', 'abc' FROM PY_Robo WHERE nome = 'robo_teste';
 
 -- Agenda (a cada 2 min) e agenda inválida
-INSERT INTO agendamento (robo_id, dias, horario, intervalo, parametros, ativo)
-SELECT id, 'TODOS', NULL, '2min', '{"dorme":3}', 1 FROM robo WHERE nome = 'robo_teste';
-INSERT INTO agendamento (robo_id, dias, horario, intervalo, parametros, ativo)
-SELECT id, 'SEG-SEX', '08:00-18:00', NULL, '{}', 1 FROM robo WHERE nome = 'robo_teste';
+INSERT INTO PY_Agendamento (robo_id, dias, horario, intervalo, parametros, ativo)
+SELECT id, 'TODOS', NULL, '2min', '{"dorme":3}', 1 FROM PY_Robo WHERE nome = 'robo_teste';
+INSERT INTO PY_Agendamento (robo_id, dias, horario, intervalo, parametros, ativo)
+SELECT id, 'SEG-SEX', '08:00-18:00', NULL, '{}', 1 FROM PY_Robo WHERE nome = 'robo_teste';
 
 -- Conferir
-SELECT id, dias, horario, intervalo, descricao, proxima_execucao, ativo FROM agendamento ORDER BY id DESC;
-SELECT TOP 20 id, origem, status, exit_code, mensagem, inicio, fim FROM fila_execucao ORDER BY id DESC;
+SELECT id, dias, horario, intervalo, descricao, proxima_execucao, ativo FROM PY_Agendamento ORDER BY id DESC;
+SELECT TOP 20 id, origem, status, exit_code, mensagem, inicio, fim FROM PY_FilaExecucao ORDER BY id DESC;
 
 -- Desligar a agenda de teste
-UPDATE agendamento SET ativo = 0 WHERE robo_id = (SELECT id FROM robo WHERE nome = 'robo_teste');
+UPDATE PY_Agendamento SET ativo = 0 WHERE robo_id = (SELECT id FROM PY_Robo WHERE nome = 'robo_teste');
 ```
 
 ---
@@ -479,9 +480,9 @@ O worker chama o bootstrap com o **mesmo JSON que o Automation Anywhere envia**,
 | Chave | De onde vem |
 |---|---|
 | `ambiente` | `ORQ_AMBIENTE` no `.env` do worker (DEV, HML ou PROD — o da máquina) |
-| `nomebot` | Nome do robô cadastrado (tabela `robo.nome`) → pasta `C:\RPA\repo\bots\<nome>` |
+| `nomebot` | Nome do robô cadastrado (tabela `PY_Robo.nome`) → pasta `C:\RPA\repo\bots\<nome>` |
 | `executar_bot` | Sempre `"True"` |
-| `caminho_repositorio` | `robo.caminho_repositorio` (cadastro do robô no front). Vazio = não clona/atualiza |
+| `caminho_repositorio` | `PY_Robo.caminho_repositorio` (cadastro do robô no front). Vazio = não clona/atualiza |
 | `parametros` | O que o usuário preencheu no formulário — o bootstrap repassa ao `main.py` do robô |
 
 O mesmo JSON também fica na variável de ambiente `ORQ_BOOTSTRAP_JSON`; `ORQ_PARAMS` continua com só os parâmetros do robô.
@@ -496,7 +497,7 @@ ou `caminho_repositorio`, o valor preenchido substitui o padrão no topo do JSON
 Ex.: um campo "Ambiente" (lista DEV/HML/PROD) permite escolher o ambiente a cada execução.
 
 **Retorno do bootstrap:** ao final, o worker lê a última linha do log que contém um JSON com `"status"`
-(`Bootstrap finalizado com status: {...}`) e grava em `fila_execucao.resultado`
+(`Bootstrap finalizado com status: {...}`) e grava em `PY_FilaExecucao.resultado`
 (rode `sql/migracoes/05_resultado_execucao.sql`). Se `status = "falha"`, a execução fica `ERRO`
 e a coluna `mensagem` recebe a `mensagem` do bootstrap (mais legível que o fim do log).
 

@@ -25,8 +25,8 @@ app.get('/api/resumo', wrap(async (_req, res) => {
       SUM(CASE WHEN status = 'EXECUTANDO' THEN 1 ELSE 0 END) AS executando,
       SUM(CASE WHEN status = 'SUCESSO' AND criado_em >= CAST(SYSDATETIME() AS date) THEN 1 ELSE 0 END) AS sucesso_hoje,
       SUM(CASE WHEN status IN ('ERRO','TIMEOUT') AND criado_em >= CAST(SYSDATETIME() AS date) THEN 1 ELSE 0 END) AS erro_hoje,
-      (SELECT ${dt('MAX(heartbeat)')} FROM fila_execucao) AS ultimo_heartbeat
-    FROM fila_execucao`);
+      (SELECT ${dt('MAX(heartbeat)')} FROM PY_FilaExecucao) AS ultimo_heartbeat
+    FROM PY_FilaExecucao`);
   res.json(r);
 }));
 
@@ -34,11 +34,11 @@ app.get('/api/resumo', wrap(async (_req, res) => {
 app.get('/api/robos', wrap(async (_req, res) => {
   res.json(await query(`
     SELECT r.id, r.nome, r.ativo, r.max_concorrencia, r.timeout_min,
-           (SELECT COUNT(*) FROM fila_execucao f WHERE f.robo_id = r.id AND f.status = 'EXECUTANDO') AS executando,
-           (SELECT COUNT(*) FROM fila_execucao f WHERE f.robo_id = r.id AND f.status = 'PENDENTE')   AS pendentes,
+           (SELECT COUNT(*) FROM PY_FilaExecucao f WHERE f.robo_id = r.id AND f.status = 'EXECUTANDO') AS executando,
+           (SELECT COUNT(*) FROM PY_FilaExecucao f WHERE f.robo_id = r.id AND f.status = 'PENDENTE')   AS pendentes,
            u.status AS ultimo_status, ${dt('u.fim')} AS ultimo_fim
-    FROM robo r
-    OUTER APPLY (SELECT TOP 1 status, fim FROM fila_execucao f
+    FROM PY_Robo r
+    OUTER APPLY (SELECT TOP 1 status, fim FROM PY_FilaExecucao f
                  WHERE f.robo_id = r.id ORDER BY f.id DESC) u
     ORDER BY r.nome`));
 }));
@@ -59,9 +59,9 @@ function validarRobo(body) {
 }
 
 async function gravarCampos(exec, roboId, campos) {
-  await exec('DELETE FROM robo_parametro WHERE robo_id = @robo', { robo: [sql.Int, roboId] });
+  await exec('DELETE FROM PY_RoboParametro WHERE robo_id = @robo', { robo: [sql.Int, roboId] });
   for (const c of campos) {
-    await exec(`INSERT INTO robo_parametro (robo_id, chave, rotulo, tipo, obrigatorio, padrao, opcoes, ajuda, ordem)
+    await exec(`INSERT INTO PY_RoboParametro (robo_id, chave, rotulo, tipo, obrigatorio, padrao, opcoes, ajuda, ordem)
                 VALUES (@robo, @chave, @rotulo, @tipo, @obrig, @padrao, @opcoes, @ajuda, @ordem)`, {
       robo: [sql.Int, roboId], chave: [sql.VarChar(50), c.chave], rotulo: [sql.NVarChar(100), c.rotulo],
       tipo: [sql.VarChar(20), c.tipo], obrig: [sql.Bit, c.obrigatorio], padrao: [sql.NVarChar(200), c.padrao],
@@ -73,7 +73,7 @@ async function gravarCampos(exec, roboId, campos) {
 // Dados completos para a tela de edição
 app.get('/api/robos/:id', wrap(async (req, res) => {
   const id = +req.params.id;
-  const [r] = await query('SELECT id, nome, ativo, max_concorrencia, timeout_min, caminho_repositorio FROM robo WHERE id = @id', { id: [sql.Int, id] });
+  const [r] = await query('SELECT id, nome, ativo, max_concorrencia, timeout_min, caminho_repositorio FROM PY_Robo WHERE id = @id', { id: [sql.Int, id] });
   if (!r) return erro(res, 404, 'Robô não encontrado');
   const campos = (await camposDoRobo(id)).map((c) => ({ ...c, opcoes: opcoesParaTexto(c.opcoes), padrao: c.padrao ?? '' }));
   res.json({ ...r, campos });
@@ -82,10 +82,10 @@ app.get('/api/robos/:id', wrap(async (req, res) => {
 app.post('/api/robos', wrap(async (req, res) => {
   let r;
   try { r = validarRobo(req.body); } catch (e) { return erro(res, 400, e.message); }
-  const [existe] = await query('SELECT id FROM robo WHERE nome = @nome', { nome: [sql.VarChar(100), r.nome] });
+  const [existe] = await query('SELECT id FROM PY_Robo WHERE nome = @nome', { nome: [sql.VarChar(100), r.nome] });
   if (existe) return erro(res, 409, `Já existe um robô chamado "${r.nome}"`);
   const id = await transacao(async (exec) => {
-    const [novo] = await exec(`INSERT INTO robo (nome, ativo, max_concorrencia, timeout_min, caminho_repositorio)
+    const [novo] = await exec(`INSERT INTO PY_Robo (nome, ativo, max_concorrencia, timeout_min, caminho_repositorio)
                                OUTPUT inserted.id VALUES (@nome, @ativo, @max, @timeout, @repo)`, {
       nome: [sql.VarChar(100), r.nome], ativo: [sql.Bit, r.ativo], max: [sql.Int, r.max], timeout: [sql.Int, r.timeout],
       repo: [sql.NVarChar(500), r.repo],
@@ -100,11 +100,11 @@ app.put('/api/robos/:id', wrap(async (req, res) => {
   const id = +req.params.id;
   let r;
   try { r = validarRobo(req.body); } catch (e) { return erro(res, 400, e.message); }
-  const [outro] = await query('SELECT id FROM robo WHERE nome = @nome AND id <> @id',
+  const [outro] = await query('SELECT id FROM PY_Robo WHERE nome = @nome AND id <> @id',
     { nome: [sql.VarChar(100), r.nome], id: [sql.Int, id] });
   if (outro) return erro(res, 409, `Já existe um robô chamado "${r.nome}"`);
   const ok = await transacao(async (exec) => {
-    const [upd] = await exec(`UPDATE robo SET nome = @nome, ativo = @ativo, max_concorrencia = @max, timeout_min = @timeout,
+    const [upd] = await exec(`UPDATE PY_Robo SET nome = @nome, ativo = @ativo, max_concorrencia = @max, timeout_min = @timeout,
                                 caminho_repositorio = @repo
                               OUTPUT inserted.id WHERE id = @id`, {
       id: [sql.Int, id], nome: [sql.VarChar(100), r.nome], ativo: [sql.Bit, r.ativo],
@@ -121,7 +121,7 @@ app.put('/api/robos/:id', wrap(async (req, res) => {
 app.patch('/api/robos/:id', wrap(async (req, res) => {
   const { ativo } = req.body;
   if (typeof ativo !== 'boolean') return erro(res, 400, 'Informe "ativo": true/false');
-  await query('UPDATE robo SET ativo = @ativo WHERE id = @id',
+  await query('UPDATE PY_Robo SET ativo = @ativo WHERE id = @id',
     { id: [sql.Int, +req.params.id], ativo: [sql.Bit, ativo] });
   res.json({ ok: true });
 }));
@@ -132,7 +132,7 @@ app.get('/api/robos/:id/parametros', wrap(async (req, res) => {
 }));
 
 app.post('/api/robos/:id/executar', wrap(async (req, res) => {
-  const [robo] = await query('SELECT id, ativo FROM robo WHERE id = @id', { id: [sql.Int, +req.params.id] });
+  const [robo] = await query('SELECT id, ativo FROM PY_Robo WHERE id = @id', { id: [sql.Int, +req.params.id] });
   if (!robo) return erro(res, 404, 'Robô não encontrado');
   if (!robo.ativo) return erro(res, 409, 'Robô está inativo');
 
@@ -141,7 +141,7 @@ app.post('/api/robos/:id/executar', wrap(async (req, res) => {
   catch (e) { return erro(res, 400, `Parâmetros inválidos: ${e.message}`); }
 
   const [novo] = await query(`
-    INSERT INTO fila_execucao (robo_id, origem, solicitado_por, parametros)
+    INSERT INTO PY_FilaExecucao (robo_id, origem, solicitado_por, parametros)
     OUTPUT inserted.id
     VALUES (@robo, 'MANUAL', @usuario, @parametros)`, {
     robo: [sql.Int, robo.id],
@@ -166,7 +166,7 @@ app.get('/api/execucoes', wrap(async (req, res) => {
            ${dt('f.criado_em')} AS criado_em, ${dt('f.inicio')} AS inicio, ${dt('f.fim')} AS fim,
            CASE WHEN f.inicio IS NULL THEN NULL
                 ELSE DATEDIFF(SECOND, f.inicio, ISNULL(f.fim, SYSDATETIME())) END AS duracao_s
-    FROM fila_execucao f JOIN robo r ON r.id = f.robo_id
+    FROM PY_FilaExecucao f JOIN PY_Robo r ON r.id = f.robo_id
     ${filtros.length ? 'WHERE ' + filtros.join(' AND ') : ''}
     ORDER BY f.id DESC`, params));
 }));
@@ -179,7 +179,7 @@ app.get('/api/execucoes/:id', wrap(async (req, res) => {
            ${dt('f.criado_em')} AS criado_em, ${dt('f.inicio')} AS inicio, ${dt('f.fim')} AS fim,
            CASE WHEN f.inicio IS NULL THEN NULL
                 ELSE DATEDIFF(SECOND, f.inicio, ISNULL(f.fim, SYSDATETIME())) END AS duracao_s
-    FROM fila_execucao f JOIN robo r ON r.id = f.robo_id
+    FROM PY_FilaExecucao f JOIN PY_Robo r ON r.id = f.robo_id
     WHERE f.id = @id`, { id: [sql.BigInt, +req.params.id] });
   if (!e) return erro(res, 404, 'Execução não encontrada');
   res.json(e);
@@ -189,7 +189,7 @@ app.post('/api/execucoes/:id/cancelar', wrap(async (req, res) => {
   const id = [sql.BigInt, +req.params.id];
   // PENDENTE: cancela direto. EXECUTANDO: pede ao worker para matar o processo.
   const [r] = await query(`
-    UPDATE fila_execucao
+    UPDATE PY_FilaExecucao
     SET status = CASE WHEN status = 'PENDENTE' THEN 'CANCELADO' ELSE status END,
         fim    = CASE WHEN status = 'PENDENTE' THEN SYSDATETIME() ELSE fim END,
         mensagem = CASE WHEN status = 'PENDENTE' THEN 'Cancelado antes de iniciar' ELSE mensagem END,
@@ -202,7 +202,7 @@ app.post('/api/execucoes/:id/cancelar', wrap(async (req, res) => {
 
 // Lê o log da execução. O caminho vem SEMPRE do banco (nunca do cliente).
 app.get('/api/execucoes/:id/log', wrap(async (req, res) => {
-  const [f] = await query('SELECT log_arquivo FROM fila_execucao WHERE id = @id',
+  const [f] = await query('SELECT log_arquivo FROM PY_FilaExecucao WHERE id = @id',
     { id: [sql.BigInt, +req.params.id] });
   if (!f || !f.log_arquivo) return res.type('text/plain').send('(sem log ainda)');
 
@@ -233,14 +233,14 @@ app.get('/api/fila', wrap(async (req, res) => {
     SELECT f.id, f.robo_id, r.nome AS robo, f.origem, f.solicitado_por, f.status, f.agendamento_id,
            f.cancelar_solicitado, ${dt('f.criado_em')} AS criado_em, ${dt('f.inicio')} AS inicio,
            CASE WHEN f.inicio IS NULL THEN NULL ELSE DATEDIFF(SECOND, f.inicio, SYSDATETIME()) END AS duracao_s
-    FROM fila_execucao f JOIN robo r ON r.id = f.robo_id
+    FROM PY_FilaExecucao f JOIN PY_Robo r ON r.id = f.robo_id
     WHERE f.status IN ('EXECUTANDO', 'PENDENTE') ${filtroRobo}
     ORDER BY CASE f.status WHEN 'EXECUTANDO' THEN 0 ELSE 1 END, f.criado_em`, params);
 
   const ags = await query(`
     SELECT a.id, a.robo_id, r.nome AS robo, r.ativo AS robo_ativo, a.dias, a.horario, a.intervalo, a.cron,
            a.descricao, ${dt('a.proxima_execucao')} AS proxima_execucao
-    FROM agendamento a JOIN robo r ON r.id = a.robo_id
+    FROM PY_Agendamento a JOIN PY_Robo r ON r.id = a.robo_id
     WHERE a.ativo = 1 ${roboId ? 'AND a.robo_id = @robo' : ''}`, params);
 
   const agora = agenda.agoraNoFuso(FUSO);
@@ -293,7 +293,7 @@ app.get('/api/agendamentos', wrap(async (_req, res) => {
   res.json(await query(`
     SELECT a.id, a.robo_id, r.nome AS robo, a.dias, a.horario, a.intervalo, a.cron,
            a.parametros, a.ativo, a.descricao, ${dt('a.proxima_execucao')} AS proxima_execucao
-    FROM agendamento a JOIN robo r ON r.id = a.robo_id
+    FROM PY_Agendamento a JOIN PY_Robo r ON r.id = a.robo_id
     ORDER BY a.ativo DESC, r.nome, a.id`));
 }));
 
@@ -307,7 +307,7 @@ app.post('/api/agendamentos', wrap(async (req, res) => {
 
   const vazio = (v) => (v && String(v).trim()) || null;
   const [novo] = await query(`
-    INSERT INTO agendamento (robo_id, dias, horario, intervalo, parametros, ativo, descricao)
+    INSERT INTO PY_Agendamento (robo_id, dias, horario, intervalo, parametros, ativo, descricao)
     OUTPUT inserted.id
     VALUES (@robo, @dias, @horario, @intervalo, @parametros, 1, N'aguardando o worker validar...')`, {
     robo: [sql.Int, +robo_id],
@@ -323,14 +323,14 @@ app.patch('/api/agendamentos/:id', wrap(async (req, res) => {
   const { ativo } = req.body;
   if (typeof ativo !== 'boolean') return erro(res, 400, 'Informe "ativo": true/false');
   // Ao reativar, zera proxima_execucao: o worker recalcula a partir de agora (sem disparo atrasado)
-  await query(`UPDATE agendamento SET ativo = @ativo,
+  await query(`UPDATE PY_Agendamento SET ativo = @ativo,
                  proxima_execucao = CASE WHEN @ativo = 1 THEN NULL ELSE proxima_execucao END
                WHERE id = @id`, { id: [sql.Int, +req.params.id], ativo: [sql.Bit, ativo] });
   res.json({ ok: true });
 }));
 
 app.delete('/api/agendamentos/:id', wrap(async (req, res) => {
-  await query('DELETE FROM agendamento WHERE id = @id', { id: [sql.Int, +req.params.id] });
+  await query('DELETE FROM PY_Agendamento WHERE id = @id', { id: [sql.Int, +req.params.id] });
   res.json({ ok: true });
 }));
 

@@ -45,19 +45,19 @@ def processar_agenda() -> int:
                 prox, descricao = calcular(a, agora)
             except RegraInvalida as e:
                 log.error("Agendamento %s inválido — desativando: %s", a.id, e)
-                cur.execute("UPDATE agendamento SET ativo = 0, descricao = ? WHERE id = ?",
+                cur.execute("UPDATE PY_Agendamento SET ativo = 0, descricao = ? WHERE id = ?",
                             f"ERRO: {e}"[:200], a.id)
                 continue
 
             if a.proxima_execucao is not None:
                 # Venceu: enfileira UMA execução, mesmo que várias tenham sido perdidas
                 cur.execute(
-                    "INSERT INTO fila_execucao (robo_id, origem, solicitado_por, parametros, agendamento_id) "
+                    "INSERT INTO PY_FilaExecucao (robo_id, origem, solicitado_por, parametros, agendamento_id) "
                     "VALUES (?, 'AGENDA', 'agendador', ?, ?)", a.robo_id, a.parametros, a.id)
                 criados += 1
                 log.info("Agendamento %s (%s) -> robo %s enfileirado", a.id, descricao, a.robo_id)
 
-            cur.execute("UPDATE agendamento SET proxima_execucao = ?, descricao = ? WHERE id = ?",
+            cur.execute("UPDATE PY_Agendamento SET proxima_execucao = ?, descricao = ? WHERE id = ?",
                         prox, descricao[:200], a.id)
         con.commit()
     except Exception:
