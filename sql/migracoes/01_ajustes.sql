@@ -1,3 +1,5 @@
+USE RPA;
+GO
 -- Colunas extras usadas pelo worker (rode uma vez; idempotente)
 IF COL_LENGTH('fila_execucao', 'cancelar_solicitado') IS NULL
     ALTER TABLE fila_execucao ADD cancelar_solicitado BIT NOT NULL DEFAULT 0;

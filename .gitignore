@@ -25,3 +25,7 @@ logs/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Node (api/ e front/)
+node_modules/
+dist/

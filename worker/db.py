@@ -31,6 +31,7 @@ class Job:
     robo_nome: str
     parametros: str | None
     timeout_min: int
+    caminho_repositorio: str | None = None
 
 
 # ---------------------------------------------------------------- fila
@@ -62,8 +63,9 @@ def pegar_proximo_job() -> Job | None:
         row = cur.execute(SQL_CLAIM, CFG.worker_nome).fetchone()
         if not row:
             return None
-        r = cur.execute("SELECT nome, timeout_min FROM robo WHERE id = ?", row.robo_id).fetchone()
-        return Job(row.id, row.robo_id, r.nome, row.parametros, r.timeout_min or 60)
+        r = cur.execute("SELECT nome, timeout_min, caminho_repositorio FROM robo WHERE id = ?",
+                        row.robo_id).fetchone()
+        return Job(row.id, row.robo_id, r.nome, row.parametros, r.timeout_min or 60, r.caminho_repositorio)
 
 
 def registrar_inicio(job_id: int, pid: int, log_arquivo: str) -> None:
@@ -81,11 +83,13 @@ def heartbeat_e_cancelamento(job_id: int) -> bool:
         return bool(row and row[0])
 
 
-def finalizar(job_id: int, status: str, exit_code: int | None, mensagem: str | None = None) -> None:
+def finalizar(job_id: int, status: str, exit_code: int | None, mensagem: str | None = None,
+              resultado: str | None = None) -> None:
+    """resultado: JSON de retorno do bootstrap (status/mensagem/resposta), quando houver."""
     with conexao() as con:
         con.execute(
-            "UPDATE fila_execucao SET status = ?, exit_code = ?, mensagem = ?, fim = SYSDATETIME() "
-            "WHERE id = ?", status, exit_code, (mensagem or "")[:2000] or None, job_id)
+            "UPDATE fila_execucao SET status = ?, exit_code = ?, mensagem = ?, resultado = ?, fim = SYSDATETIME() "
+            "WHERE id = ?", status, exit_code, (mensagem or "")[:2000] or None, resultado, job_id)
 
 
 def recuperar_orfaos() -> int:
@@ -116,7 +120,8 @@ def agendamentos_vencidos(agora: datetime):
     con = pyodbc.connect(CFG.conn_str, autocommit=False, timeout=15)
     cur = con.cursor()
     rows = cur.execute(
-        "SELECT a.id, a.robo_id, a.cron, a.parametros, a.proxima_execucao "
+        "SELECT a.id, a.robo_id, a.cron, a.dias, a.horario, a.intervalo, "
+        "       a.parametros, a.proxima_execucao "
         "FROM agendamento a WITH (UPDLOCK, READPAST, ROWLOCK) "
         "JOIN robo r ON r.id = a.robo_id "
         "WHERE a.ativo = 1 AND r.ativo = 1 "

@@ -29,7 +29,7 @@ class Config:
 
     # Como o robô é executado: python + bootstrap + nome do robô
     python_exe: str = os.getenv("ORQ_PYTHON", r"C:\Python315\python.exe")
-    bootstrap: str = os.getenv("ORQ_BOOTSTRAP", r"C:\robos\bootstrap.py")
+    bootstrap: str = os.getenv("ORQ_BOOTSTRAP", r"C:\Users\marce\Documents\Python\Automation\bootstrap_template\bootstrap.py")
     pasta_logs: Path = Path(os.getenv("ORQ_PASTA_LOGS", r"C:\robos\logs"))
 
     max_jobs_simultaneos: int = _int("ORQ_MAX_JOBS", 2)    # limite total deste worker
@@ -39,6 +39,9 @@ class Config:
     orfao_apos_s: int = _int("ORQ_ORFAO_S", 120)           # heartbeat parado -> job órfão
 
     fuso: str = os.getenv("ORQ_FUSO", "America/Sao_Paulo")  # cron interpretado neste fuso
+
+    # Ambiente enviado ao bootstrap ("ambiente" no JSON): DEV, HML ou PROD — o da máquina onde o worker roda
+    ambiente: str = os.getenv("ORQ_AMBIENTE", "DEV").strip().upper()
 
 
 CFG = Config()
