@@ -25,7 +25,7 @@ app.get('/api/resumo', wrap(async (_req, res) => {
       SUM(CASE WHEN status = 'EXECUTANDO' THEN 1 ELSE 0 END) AS executando,
       SUM(CASE WHEN status = 'SUCESSO' AND criado_em >= CAST(SYSDATETIME() AS date) THEN 1 ELSE 0 END) AS sucesso_hoje,
       SUM(CASE WHEN status IN ('ERRO','TIMEOUT') AND criado_em >= CAST(SYSDATETIME() AS date) THEN 1 ELSE 0 END) AS erro_hoje,
-      (SELECT ${dt('MAX(heartbeat)')} FROM PY_FilaExecucao) AS ultimo_heartbeat
+      (SELECT ${dt('MAX(ultimo_sinal)')} FROM PY_FilaExecucao) AS ultimo_sinal
     FROM PY_FilaExecucao`);
   res.json(r);
 }));
@@ -185,6 +185,26 @@ app.get('/api/execucoes/:id', wrap(async (req, res) => {
   res.json(e);
 }));
 
+// Executa de novo: nova linha na fila com o mesmo robô e os mesmos parâmetros da execução escolhida
+app.post('/api/execucoes/:id/reexecutar', wrap(async (req, res) => {
+  const [orig] = await query(`
+    SELECT f.id, f.robo_id, f.parametros, r.nome AS robo, r.ativo
+    FROM PY_FilaExecucao f JOIN PY_Robo r ON r.id = f.robo_id
+    WHERE f.id = @id`, { id: [sql.BigInt, +req.params.id] });
+  if (!orig) return erro(res, 404, 'Execução não encontrada');
+  if (!orig.ativo) return erro(res, 409, `O robô ${orig.robo} está inativo — ative-o na aba Robôs para executar`);
+
+  const [novo] = await query(`
+    INSERT INTO PY_FilaExecucao (robo_id, origem, solicitado_por, parametros)
+    OUTPUT inserted.id
+    VALUES (@robo, 'MANUAL', @usuario, @parametros)`, {
+    robo: [sql.Int, orig.robo_id],
+    usuario: [sql.VarChar(100), (req.body.solicitado_por || 'front').slice(0, 100)],
+    parametros: [sql.NVarChar(sql.MAX), orig.parametros || '{}'],
+  });
+  res.status(201).json({ id: novo.id, origem_id: orig.id });
+}));
+
 app.post('/api/execucoes/:id/cancelar', wrap(async (req, res) => {
   const id = [sql.BigInt, +req.params.id];
   // PENDENTE: cancela direto. EXECUTANDO: pede ao worker para matar o processo.
@@ -238,7 +258,7 @@ app.get('/api/fila', wrap(async (req, res) => {
     ORDER BY CASE f.status WHEN 'EXECUTANDO' THEN 0 ELSE 1 END, f.criado_em`, params);
 
   const ags = await query(`
-    SELECT a.id, a.robo_id, r.nome AS robo, r.ativo AS robo_ativo, a.dias, a.horario, a.intervalo, a.cron,
+    SELECT a.id, a.robo_id, r.nome AS robo, r.ativo AS robo_ativo, a.dias, a.horario, a.intervalo,
            a.descricao, ${dt('a.proxima_execucao')} AS proxima_execucao
     FROM PY_Agendamento a JOIN PY_Robo r ON r.id = a.robo_id
     WHERE a.ativo = 1 ${roboId ? 'AND a.robo_id = @robo' : ''}`, params);
@@ -262,11 +282,8 @@ app.get('/api/fila', wrap(async (req, res) => {
     if (!a.proxima_execucao) { item.aviso = 'aguardando o worker calcular a primeira execução'; continue; }
     const primeira = agenda.deTexto(a.proxima_execucao);
     let lista;
-    if (a.cron) lista = primeira <= ate ? [primeira] : [];
-    else {
-      try { lista = agenda.ocorrencias(agenda.criarRegra(a.dias, a.horario, a.intervalo), primeira, ate, 20000); }
-      catch (e) { item.aviso = `regra inválida: ${e.message}`; continue; }
-    }
+    try { lista = agenda.ocorrencias(agenda.criarRegra(a.dias, a.horario, a.intervalo), primeira, ate, 20000); }
+    catch (e) { item.aviso = `regra inválida: ${e.message}`; continue; }
     item.total = lista.length;
     item.proxima = lista.length ? agenda.paraTexto(lista[0]) : null;
     if (!lista.length) item.proxima_fora = a.proxima_execucao; // próxima existe, mas fora do período
@@ -291,7 +308,7 @@ app.get('/api/fila', wrap(async (req, res) => {
 // ------------------------------------------------------------------ agendamentos
 app.get('/api/agendamentos', wrap(async (_req, res) => {
   res.json(await query(`
-    SELECT a.id, a.robo_id, r.nome AS robo, a.dias, a.horario, a.intervalo, a.cron,
+    SELECT a.id, a.robo_id, r.nome AS robo, a.dias, a.horario, a.intervalo,
            a.parametros, a.ativo, a.descricao, ${dt('a.proxima_execucao')} AS proxima_execucao
     FROM PY_Agendamento a JOIN PY_Robo r ON r.id = a.robo_id
     ORDER BY a.ativo DESC, r.nome, a.id`));

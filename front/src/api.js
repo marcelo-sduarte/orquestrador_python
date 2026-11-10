@@ -25,6 +25,7 @@ export const api = {
     const q = new URLSearchParams(Object.entries(filtros).filter(([, v]) => v)).toString();
     return chamar('GET', `/api/execucoes${q ? '?' + q : ''}`);
   },
+  reexecutar: (id, solicitado_por) => chamar('POST', `/api/execucoes/${id}/reexecutar`, { solicitado_por }),
   cancelar: (id) => chamar('POST', `/api/execucoes/${id}/cancelar`),
   execucao: (id) => chamar('GET', `/api/execucoes/${id}`),
   log: (id) => chamar('GET', `/api/execucoes/${id}/log`),

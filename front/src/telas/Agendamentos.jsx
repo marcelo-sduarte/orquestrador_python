@@ -164,7 +164,7 @@ export default function Agendamentos({ avisar, filtroRobo = '', setFiltroRobo = 
               <td>{a.robo}</td>
               <td className={a.descricao?.startsWith('ERRO') ? 'falha' : ''}>
                 {a.descricao || '—'}
-                <div className="dica">{a.cron ? `cron: ${a.cron}` : `${a.dias || '(todos)'} | ${a.horario || '(dia todo)'} | ${a.intervalo || '(uma vez)'}`}</div>
+                <div className="dica">{`${a.dias || '(todos)'} | ${a.horario || '(dia todo)'} | ${a.intervalo || '(uma vez)'}`}</div>
               </td>
               <td>{a.ativo ? hora(a.proxima_execucao) : '—'}</td>
               <td>

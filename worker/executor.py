@@ -1,4 +1,4 @@
-"""Executa um job: chama o bootstrap.py, acompanha heartbeat, cancelamento e timeout."""
+"""Executa um job: chama o bootstrap.py, envia sinal de vida, trata cancelamento e timeout."""
 from __future__ import annotations
 
 import json
@@ -16,7 +16,7 @@ from config import CFG
 log = logging.getLogger("executor")
 
 # Chaves do próprio bootstrap: se aparecerem nos parâmetros do formulário, vão para o topo do JSON
-CHAVES_BOOTSTRAP = ("ambiente", "executar_bot", "caminho_repositorio")
+CHAVES_BOOTSTRAP = ("ambiente", "executar_bot", "caminho_repositorio", "branch")
 
 
 def _matar_arvore(pid: int) -> None:
@@ -91,9 +91,9 @@ def executar(job: db.Job, parar) -> None:
 
         while proc.poll() is None:
             try:
-                cancelar = db.heartbeat_e_cancelamento(job.id)
+                cancelar = db.sinal_de_vida_e_cancelamento(job.id)
             except Exception:  # banco fora do ar não derruba o robô; tenta de novo no próximo ciclo
-                log.exception("Job %s: falha no heartbeat", job.id)
+                log.exception("Job %s: falha ao gravar o sinal de vida", job.id)
                 cancelar = False
 
             if cancelar:
@@ -109,7 +109,7 @@ def executar(job: db.Job, parar) -> None:
                 break
 
             try:
-                proc.wait(timeout=CFG.intervalo_heartbeat_s)
+                proc.wait(timeout=CFG.intervalo_sinal_s)
             except subprocess.TimeoutExpired:
                 pass
 

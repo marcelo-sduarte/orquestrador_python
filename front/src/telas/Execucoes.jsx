@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { Status, duracao, hora, usePolling } from '../comum.jsx';
+import { Status, duracao, hora, usePolling, resumoParametros } from '../comum.jsx';
 import LogModal from './LogModal.jsx';
 
 const STATUS = ['', 'PENDENTE', 'EXECUTANDO', 'SUCESSO', 'ERRO', 'CANCELADO', 'TIMEOUT'];
@@ -10,6 +10,7 @@ export default function Execucoes({ avisar }) {
   const [robos, setRobos] = useState([]);
   const [filtro, setFiltro] = useState({ status: '', robo_id: '' });
   const [logDe, setLogDe] = useState(null);
+  const [enviando, setEnviando] = useState(null); // id da execução sendo reenviada
 
   useEffect(() => { api.robos().then(setRobos).catch(() => {}); }, []);
   usePolling(() => api.execucoes(filtro).then(setLista).catch(() => {}), 3000, [filtro.status, filtro.robo_id]);
@@ -20,6 +21,18 @@ export default function Execucoes({ avisar }) {
       const r = await api.cancelar(e.id);
       avisar(r.status_anterior === 'PENDENTE' ? `#${e.id} cancelada` : `Cancelamento de #${e.id} solicitado ao worker`);
     } catch (err) { avisar(err.message, 'erro'); }
+  }
+
+  async function executarNovamente(e) {
+    const params = resumoParametros(e.parametros);
+    if (!confirm(`Executar ${e.robo} novamente com os mesmos parâmetros da #${e.id}?\n\nParâmetros: ${params}`)) return;
+    setEnviando(e.id);
+    try {
+      const r = await api.reexecutar(e.id, localStorage.getItem('orq_usuario') || 'front');
+      avisar(`Execução #${r.id} enfileirada (mesmos parâmetros da #${e.id})`);
+      api.execucoes(filtro).then(setLista).catch(() => {});
+    } catch (err) { avisar(err.message, 'erro'); }
+    finally { setEnviando(null); }
   }
 
   return (
@@ -57,6 +70,12 @@ export default function Execucoes({ avisar }) {
               <td><span className="trunc" title={e.mensagem || ''}>{e.mensagem || ''}</span></td>
               <td className="acoes">
                 <button className="btn-link" onClick={() => setLogDe(e)}>log</button>
+                {e.status !== 'PENDENTE' && (
+                  <button className="btn-link" disabled={enviando === e.id} onClick={() => executarNovamente(e)}
+                          title={`Executar de novo com: ${resumoParametros(e.parametros)}`}>
+                    {enviando === e.id ? 'enviando…' : '↻ executar novamente'}
+                  </button>
+                )}
                 {['PENDENTE', 'EXECUTANDO'].includes(e.status) && !e.cancelar_solicitado && (
                   <button className="btn-link perigo" onClick={() => cancelar(e)}>cancelar</button>
                 )}

@@ -1,4 +1,4 @@
-"""Agendamento "amigável": dias + horário + intervalo, sem precisar saber cron.
+"""Regras de agendamento: dias + horário + intervalo.
 
     dias      'SEG-SEX' | 'SEG,QUA,SEX' | 'TODOS' | 'UTEIS' | 'FDS' | NULL (= todos)
     horario   '09:00' (uma vez) | '08:00-18:00' (janela) | '8-18' | '8h30-17h' | NULL (= dia todo)

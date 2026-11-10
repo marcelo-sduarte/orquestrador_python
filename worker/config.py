@@ -35,10 +35,10 @@ class Config:
     max_jobs_simultaneos: int = _int("ORQ_MAX_JOBS", 2)    # limite total deste worker
     intervalo_poll_s: int = _int("ORQ_POLL_S", 5)          # busca de novos jobs
     intervalo_agenda_s: int = _int("ORQ_AGENDA_S", 30)     # verificação dos agendamentos
-    intervalo_heartbeat_s: int = _int("ORQ_HEARTBEAT_S", 10)
-    orfao_apos_s: int = _int("ORQ_ORFAO_S", 120)           # heartbeat parado -> job órfão
+    intervalo_sinal_s: int = _int("ORQ_SINAL_S", 10)       # sinal de vida (ultimo_sinal) e checagem de cancelamento
+    orfao_apos_s: int = _int("ORQ_ORFAO_S", 120)           # sem sinal de vida há mais que isso -> job órfão
 
-    fuso: str = os.getenv("ORQ_FUSO", "America/Sao_Paulo")  # cron interpretado neste fuso
+    fuso: str = os.getenv("ORQ_FUSO", "America/Sao_Paulo")  # horários dos agendamentos
 
     # Ambiente enviado ao bootstrap ("ambiente" no JSON): DEV, HML ou PROD — o da máquina onde o worker roda
     ambiente: str = os.getenv("ORQ_AMBIENTE", "DEV").strip().upper()

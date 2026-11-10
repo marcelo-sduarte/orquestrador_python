@@ -1,10 +1,11 @@
 /* ============================================================================
-   Orquestrador de Robôs — criação do banco (estado atual completo)
+   Orquestrador de Robôs — criação do banco
 
-   Tabelas com prefixo PY_ (identificação fácil no ambiente).
-
-   Use este script para um banco NOVO. Para um banco que já existe e foi criado
-   com versões anteriores, rode os scripts de sql/migracoes/ em ordem (01 → 06).
+   Cria as 4 tabelas do orquestrador (prefixo PY_):
+     PY_Robo           robôs cadastrados
+     PY_RoboParametro  informações pedidas no formulário de cada robô
+     PY_Agendamento    quando cada robô roda
+     PY_FilaExecucao   cada execução (fila, andamento e histórico)
 
    Pode ser rodado mais de uma vez: só cria o que ainda não existe.
    ============================================================================ */
@@ -48,14 +49,12 @@ CREATE TABLE dbo.PY_RoboParametro (
 GO
 
 /* ----------------------------------------------------------------------------
-   PY_Agendamento — quando cada robô roda
-   Forma amigável (dias / horario / intervalo) ou cron (tem prioridade se preenchido)
+   PY_Agendamento — quando cada robô roda (dias + horário + intervalo)
    ---------------------------------------------------------------------------- */
 IF OBJECT_ID('dbo.PY_Agendamento') IS NULL
 CREATE TABLE dbo.PY_Agendamento (
     id               INT IDENTITY PRIMARY KEY,
     robo_id          INT           REFERENCES dbo.PY_Robo(id),
-    cron             VARCHAR(50)   NULL,               -- opcional/avançado: '30 6 1 * *'
     dias             VARCHAR(50)   NULL,               -- 'SEG-SEX', 'SEG,QUA,SEX', 'TODOS', 'FDS'
     horario          VARCHAR(20)   NULL,               -- '09:00' ou '08:00-18:00'
     intervalo        VARCHAR(10)   NULL,               -- '15min', '1h', '1h30'
@@ -79,7 +78,7 @@ CREATE TABLE dbo.PY_FilaExecucao (
     status              VARCHAR(20)    DEFAULT 'PENDENTE', -- PENDENTE/EXECUTANDO/SUCESSO/ERRO/CANCELADO/TIMEOUT
     worker              VARCHAR(100),                  -- máquina que executou
     pid                 INT,
-    heartbeat           DATETIME2,                     -- atualizado a cada ~10 s enquanto roda
+    ultimo_sinal        DATETIME2,                     -- sinal de vida: o worker atualiza a cada ~10 s enquanto roda
     inicio              DATETIME2,
     fim                 DATETIME2,
     exit_code           INT,

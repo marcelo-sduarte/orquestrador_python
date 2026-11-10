@@ -1,16 +1,12 @@
-"""Transforma agendamentos vencidos em linhas na fila_execucao.
+"""Transforma agendamentos vencidos em linhas na PY_FilaExecucao.
 
-Cada agendamento usa UMA das formas:
-  - amigável: colunas dias / horario / intervalo   (ver regra_agenda.py)
-  - avançada: coluna cron preenchida (tem prioridade)
+A regra de cada agendamento vem das colunas dias / horario / intervalo (ver regra_agenda.py).
 """
 from __future__ import annotations
 
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
-
-from croniter import croniter
 
 import db
 from config import CFG
@@ -27,10 +23,6 @@ def agora_local() -> datetime:
 
 def calcular(a, base: datetime) -> tuple[datetime, str]:
     """Devolve (próxima execução, descrição legível). Lança RegraInvalida."""
-    if a.cron and a.cron.strip():
-        if not croniter.is_valid(a.cron):
-            raise RegraInvalida(f"cron inválido: {a.cron!r}")
-        return croniter(a.cron, base).get_next(datetime), f"cron: {a.cron}"
     regra = Regra.de_colunas(a.dias, a.horario, a.intervalo)
     return regra.proxima(base), regra.descrever()
 

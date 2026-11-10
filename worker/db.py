@@ -48,7 +48,7 @@ SQL_CLAIM = """
     ORDER BY f.criado_em
 )
 UPDATE candidato
-SET status = 'EXECUTANDO', worker = ?, inicio = SYSDATETIME(), heartbeat = SYSDATETIME()
+SET status = 'EXECUTANDO', worker = ?, inicio = SYSDATETIME(), ultimo_sinal = SYSDATETIME()
 OUTPUT inserted.id, inserted.robo_id, inserted.parametros;
 """
 
@@ -74,11 +74,11 @@ def registrar_inicio(job_id: int, pid: int, log_arquivo: str) -> None:
                     pid, log_arquivo, job_id)
 
 
-def heartbeat_e_cancelamento(job_id: int) -> bool:
-    """Atualiza o heartbeat e devolve True se alguém pediu para cancelar."""
+def sinal_de_vida_e_cancelamento(job_id: int) -> bool:
+    """Atualiza ultimo_sinal (prova de que a execução segue viva) e devolve True se pediram para cancelar."""
     with conexao() as con:
         row = con.execute(
-            "UPDATE PY_FilaExecucao SET heartbeat = SYSDATETIME() "
+            "UPDATE PY_FilaExecucao SET ultimo_sinal = SYSDATETIME() "
             "OUTPUT inserted.cancelar_solicitado WHERE id = ?", job_id).fetchone()
         return bool(row and row[0])
 
@@ -93,12 +93,12 @@ def finalizar(job_id: int, status: str, exit_code: int | None, mensagem: str | N
 
 
 def recuperar_orfaos() -> int:
-    """Jobs EXECUTANDO cujo worker parou de mandar heartbeat (VM caiu, serviço morto)."""
+    """Jobs EXECUTANDO cujo worker parou de dar sinal de vida (VM caiu, serviço morto)."""
     with conexao() as con:
         cur = con.execute(
             "UPDATE PY_FilaExecucao SET status = 'ERRO', fim = SYSDATETIME(), "
             "mensagem = 'Órfão: worker parou de responder' "
-            "WHERE status = 'EXECUTANDO' AND DATEDIFF(SECOND, heartbeat, SYSDATETIME()) > ?",
+            "WHERE status = 'EXECUTANDO' AND DATEDIFF(SECOND, ultimo_sinal, SYSDATETIME()) > ?",
             CFG.orfao_apos_s)
         return cur.rowcount
 
@@ -120,7 +120,7 @@ def agendamentos_vencidos(agora: datetime):
     con = pyodbc.connect(CFG.conn_str, autocommit=False, timeout=15)
     cur = con.cursor()
     rows = cur.execute(
-        "SELECT a.id, a.robo_id, a.cron, a.dias, a.horario, a.intervalo, "
+        "SELECT a.id, a.robo_id, a.dias, a.horario, a.intervalo, "
         "       a.parametros, a.proxima_execucao "
         "FROM PY_Agendamento a WITH (UPDLOCK, READPAST, ROWLOCK) "
         "JOIN PY_Robo r ON r.id = a.robo_id "
