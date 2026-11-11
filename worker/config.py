@@ -29,7 +29,7 @@ class Config:
 
     # Como o robô é executado: python + bootstrap + nome do robô
     python_exe: str = os.getenv("ORQ_PYTHON", r"C:\Python315\python.exe")
-    bootstrap: str = os.getenv("ORQ_BOOTSTRAP", r"C:\Users\marce\Documents\Python\Automation\bootstrap_template\bootstrap.py")
+    bootstrap: str = os.getenv("ORQ_BOOTSTRAP", r"C:\robos\bootstrap.py")
     pasta_logs: Path = Path(os.getenv("ORQ_PASTA_LOGS", r"C:\robos\logs"))
 
     max_jobs_simultaneos: int = _int("ORQ_MAX_JOBS", 2)    # limite total deste worker
