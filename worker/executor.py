@@ -8,30 +8,14 @@ import subprocess
 import time
 from datetime import datetime
 
-import psutil
-
 import db
 from config import CFG
+from processos import matar_arvore
 
 log = logging.getLogger("executor")
 
 # Chaves do próprio bootstrap: se aparecerem nos parâmetros do formulário, vão para o topo do JSON
 CHAVES_BOOTSTRAP = ("ambiente", "executar_bot", "caminho_repositorio", "branch")
-
-
-def _matar_arvore(pid: int) -> None:
-    """Mata o processo e todos os filhos (bootstrap -> python do venv -> chromedriver...)."""
-    try:
-        pai = psutil.Process(pid)
-    except psutil.NoSuchProcess:
-        return
-    filhos = pai.children(recursive=True)
-    for p in [*filhos, pai]:
-        try:
-            p.kill()
-        except psutil.NoSuchProcess:
-            pass
-    psutil.wait_procs([*filhos, pai], timeout=10)
 
 
 def executar(job: db.Job, parar) -> None:
@@ -85,33 +69,53 @@ def executar(job: db.Job, parar) -> None:
             db.finalizar(job.id, "ERRO", None, f"Falha ao iniciar processo: {e}")
             return
 
-        db.registrar_inicio(job.id, proc.pid, str(arq_log))
         limite = time.monotonic() + job.timeout_min * 60
         status, mensagem = None, None
+        pid_registrado = False
 
-        while proc.poll() is None:
-            try:
-                cancelar = db.sinal_de_vida_e_cancelamento(job.id)
-            except Exception:  # banco fora do ar não derruba o robô; tenta de novo no próximo ciclo
-                log.exception("Job %s: falha ao gravar o sinal de vida", job.id)
-                cancelar = False
+        # A partir daqui o robô está rodando: nenhuma exceção pode sair deste bloco deixando o
+        # processo sem supervisão. Erro inesperado => mata a árvore do robô antes de propagar.
+        try:
+            while proc.poll() is None:
+                # Banco fora do ar não derruba a supervisão: tenta de novo no próximo ciclo
+                if not pid_registrado:
+                    try:
+                        db.registrar_inicio(job.id, proc.pid, str(arq_log))
+                        pid_registrado = True
+                    except Exception:
+                        log.exception("Job %s: falha ao registrar o pid %s (tenta de novo)", job.id, proc.pid)
 
-            if cancelar:
-                status, mensagem = "CANCELADO", "Cancelado pelo usuário"
-            elif time.monotonic() > limite:
-                status, mensagem = "TIMEOUT", f"Excedeu {job.timeout_min} min"
-            elif parar.is_set():
-                status, mensagem = "ERRO", "Worker encerrado durante a execução"
+                try:
+                    cancelar, status_banco = db.sinal_de_vida_e_cancelamento(job.id)
+                except Exception:
+                    log.exception("Job %s: falha ao gravar o sinal de vida", job.id)
+                    cancelar, status_banco = False, "EXECUTANDO"
 
-            if status:
-                log.warning("Job %s: %s — matando processo %s", job.id, mensagem, proc.pid)
-                _matar_arvore(proc.pid)
-                break
+                if cancelar:
+                    status, mensagem = "CANCELADO", "Cancelado pelo usuário"
+                elif status_banco != "EXECUTANDO":
+                    # Marcada como órfã (ficou sem sinal de vida, ex.: banco fora): a vaga do robô já foi
+                    # liberada e outra execução pode começar. Encerra esta para não rodar em duplicidade.
+                    status, mensagem = "ERRO", ("Encerrado: execução tinha sido marcada como órfã "
+                                                f"(status {status_banco}) enquanto o banco estava fora")
+                elif time.monotonic() > limite:
+                    status, mensagem = "TIMEOUT", f"Excedeu {job.timeout_min} min"
+                elif parar.is_set():
+                    status, mensagem = "ERRO", "Worker encerrado durante a execução"
 
-            try:
-                proc.wait(timeout=CFG.intervalo_sinal_s)
-            except subprocess.TimeoutExpired:
-                pass
+                if status:
+                    log.warning("Job %s: %s — matando processo %s", job.id, mensagem, proc.pid)
+                    matar_arvore(proc.pid)
+                    break
+
+                try:
+                    proc.wait(timeout=CFG.intervalo_sinal_s)
+                except subprocess.TimeoutExpired:
+                    pass
+        except BaseException:
+            log.exception("Job %s: erro inesperado na supervisão — matando processo %s", job.id, proc.pid)
+            matar_arvore(proc.pid)
+            raise
 
         exit_code = proc.wait()
 
@@ -127,8 +131,22 @@ def executar(job: db.Job, parar) -> None:
             status = "ERRO"
         if status == "ERRO":
             mensagem = (retorno or {}).get("mensagem") or _ultimas_linhas(arq_log)
-    db.finalizar(job.id, status, exit_code, mensagem, resultado)
+    _finalizar_com_retentativa(job.id, status, exit_code, mensagem, resultado, parar)
     log.info("Job %s finalizado: %s (exit %s)", job.id, status, exit_code)
+
+
+def _finalizar_com_retentativa(job_id, status, exit_code, mensagem, resultado, parar, tentativas: int = 6) -> None:
+    """O robô já terminou: se o banco estiver fora, tenta gravar o resultado mais algumas vezes
+    em vez de perder o status (a linha ficaria EXECUTANDO até virar órfã)."""
+    for n in range(1, tentativas + 1):
+        try:
+            db.finalizar(job_id, status, exit_code, mensagem, resultado)
+            return
+        except Exception:
+            if n == tentativas:
+                raise
+            log.exception("Job %s: falha ao gravar o resultado (tentativa %s/%s)", job_id, n, tentativas)
+            parar.wait(CFG.intervalo_sinal_s)
 
 
 def ler_retorno_bootstrap(caminho) -> dict | None:

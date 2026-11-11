@@ -74,13 +74,15 @@ def registrar_inicio(job_id: int, pid: int, log_arquivo: str) -> None:
                     pid, log_arquivo, job_id)
 
 
-def sinal_de_vida_e_cancelamento(job_id: int) -> bool:
-    """Atualiza ultimo_sinal (prova de que a execução segue viva) e devolve True se pediram para cancelar."""
+def sinal_de_vida_e_cancelamento(job_id: int) -> tuple[bool, str | None]:
+    """Atualiza ultimo_sinal (prova de que a execução segue viva).
+    Devolve (cancelar_solicitado, status atual). Status diferente de EXECUTANDO significa que
+    a execução foi marcada como órfã enquanto o banco estava fora: a vaga do robô já foi liberada."""
     with conexao() as con:
         row = con.execute(
             "UPDATE PY_FilaExecucao SET ultimo_sinal = SYSDATETIME() "
-            "OUTPUT inserted.cancelar_solicitado WHERE id = ?", job_id).fetchone()
-        return bool(row and row[0])
+            "OUTPUT inserted.cancelar_solicitado, inserted.status WHERE id = ?", job_id).fetchone()
+        return (bool(row[0]), row[1]) if row else (False, None)
 
 
 def finalizar(job_id: int, status: str, exit_code: int | None, mensagem: str | None = None,
@@ -103,8 +105,16 @@ def recuperar_orfaos() -> int:
         return cur.rowcount
 
 
+def execucoes_em_andamento_do_worker() -> list[tuple[int, int | None]]:
+    """[(id, pid), ...] que constam como EXECUTANDO neste worker."""
+    with conexao() as con:
+        rows = con.execute("SELECT id, pid FROM PY_FilaExecucao WHERE status = 'EXECUTANDO' AND worker = ?",
+                           CFG.worker_nome).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+
 def marcar_jobs_do_worker_como_interrompidos() -> int:
-    """Na inicialização: o que estava EXECUTANDO neste worker morreu junto com ele."""
+    """Na inicialização, DEPOIS de encerrar os processos que sobraram: libera as vagas como ERRO."""
     with conexao() as con:
         cur = con.execute(
             "UPDATE PY_FilaExecucao SET status = 'ERRO', fim = SYSDATETIME(), "

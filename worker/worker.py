@@ -14,6 +14,7 @@ from logging.handlers import TimedRotatingFileHandler
 import agendador
 import db
 import executor
+import processos
 from config import CFG
 
 
@@ -40,9 +41,24 @@ def main() -> None:
         signal.signal(signal.SIGBREAK, lambda *_: parar.set())
 
     log.info("Worker '%s' iniciando (max %s jobs)", CFG.worker_nome, CFG.max_jobs_simultaneos)
-    n = db.marcar_jobs_do_worker_como_interrompidos()
-    if n:
-        log.warning("%s job(s) deste worker ficaram órfãos no último desligamento", n)
+    if processos.ativar_encerramento_junto_com_worker():
+        log.info("Job Object ativo: se o worker cair, o Windows encerra os robôs junto")
+
+    # Execuções que estavam rodando quando o worker caiu: primeiro encerra o que sobrou vivo,
+    # só depois libera as vagas (senão o mesmo robô poderia começar de novo com o antigo ainda rodando)
+    while not parar.is_set():
+        try:
+            interrompidos = db.execucoes_em_andamento_do_worker()
+            if (n := processos.encerrar_processos_restantes(interrompidos, CFG.bootstrap)):
+                log.warning("%s processo(s) de robô ainda estavam rodando e foram encerrados", n)
+            if (n := db.marcar_jobs_do_worker_como_interrompidos()):
+                log.warning("%s job(s) deste worker ficaram órfãos no último desligamento", n)
+            break
+        except Exception:
+            log.exception("Banco indisponível ao iniciar — tentando de novo em %ss", CFG.intervalo_poll_s)
+            parar.wait(CFG.intervalo_poll_s)
+    else:
+        return
 
     pool = ThreadPoolExecutor(max_workers=CFG.max_jobs_simultaneos, thread_name_prefix="job")
     rodando: set = set()

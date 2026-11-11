@@ -63,6 +63,7 @@ orquestrador/
 │   ├── agendador.py       agendamentos vencidos → fila
 │   ├── regra_agenda.py    interpreta dias / horário / intervalo
 │   ├── executor.py        executa um job (bootstrap, log, sinal de vida, timeout, cancelamento)
+│   ├── processos.py       encerra a árvore de processos dos robôs (inclusive se o worker cair)
 │   ├── db.py              todas as queries do worker
 │   ├── config.py          lê o .env
 │   ├── requirements.txt
@@ -341,10 +342,35 @@ A execução é "pega" com um único `UPDATE` com bloqueio (`UPDLOCK, READPAST`)
   pedido de cancelamento → tempo máximo → desligamento do worker. Em qualquer um deles, encerra o processo
   **e todos os filhos** (bootstrap, Python do robô, chromedriver, navegador...).
 
+- A supervisão não para por falha de banco: se gravar o pid, o sinal de vida ou o resultado falhar,
+  o worker tenta de novo no ciclo seguinte. Qualquer erro inesperado na supervisão encerra o robô antes
+  de propagar — nunca sobra processo de robô sem dono.
+
 ### Execuções órfãs
 Se uma execução está `EXECUTANDO` mas o `ultimo_sinal` não é atualizado há mais de 120 s (`ORQ_ORFAO_S`),
 o worker que a executava caiu (VM desligada, processo morto). Ela é marcada como `ERRO`.
-Ao iniciar, o worker também marca como `ERRO` o que tinha ficado `EXECUTANDO` em seu nome.
+Se o worker na verdade estava vivo (ex.: banco fora do ar por mais que `ORQ_ORFAO_S`), ao voltar a falar
+com o banco ele vê que a execução foi marcada como órfã e **encerra o robô**, porque a vaga já foi
+liberada e outra execução do mesmo robô pode ter começado.
+
+### Robôs não sobrevivem à queda do worker
+No Windows, quando um processo morre os filhos dele continuam rodando. Para o robô não ficar rodando
+sem supervisão (e não rodar em duplicidade com a próxima execução), há duas proteções:
+
+1. **Job Object** — ao iniciar, o worker entra num *Job Object* do Windows com `KILL_ON_JOB_CLOSE`.
+   Todo processo que ele inicia (bootstrap, robô, Chrome, chromedriver...) fica no mesmo Job.
+   Se o worker cair de qualquer forma (travamento, falta de memória, "Finalizar tarefa", reinício
+   do serviço), o Windows encerra todos. No `worker.log` aparece
+   `Job Object ativo: se o worker cair, o Windows encerra os robôs junto`.
+2. **Limpeza ao reiniciar** — ao subir, o worker procura as execuções que ficaram `EXECUTANDO` em seu nome,
+   encerra a árvore de cada `pid` que ainda for um processo do bootstrap e **só então** marca as
+   execuções como `ERRO` (liberando a vaga do robô).
+
+Processos abertos fora da árvore do robô (ex.: Excel iniciado via COM/DCOM) não são filhos do worker e
+não são cobertos por essas proteções.
+
+**Como validar:** com um robô rodando, finalize o `python.exe` do worker pelo Gerenciador de Tarefas.
+O bootstrap, o Python do robô e o navegador devem sumir na hora.
 
 ---
 
@@ -472,6 +498,7 @@ com `AppDirectory` em `api`).
 | Execução fica em `PENDENTE` | Worker parado, robô inativo ou limite de execuções simultâneas atingido |
 | Execução vai para `ERRO` com `WinError 2` | `ORQ_PYTHON` ou `ORQ_BOOTSTRAP` com caminho errado |
 | Execução marcada como órfã | O worker que a executava parou. Veja `ORQ_PASTA_LOGS\worker.log` |
+| `Job Object não ativado` no `worker.log` | O Windows recusou o Job Object (versão antiga ou política). A limpeza ao reiniciar continua ativa, mas se o worker cair o robô roda até o worker voltar |
 | Mudança no `.env` não fez efeito | O worker só lê o `.env` ao iniciar: reinicie-o |
 | Agendamento não dispara | Desativado, regra inválida (veja a coluna Regra) ou ainda na primeira passada |
 | Horários "errados" na tela | `ORQ_FUSO` diferente entre worker/API e o fuso do SQL Server |
