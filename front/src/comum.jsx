@@ -76,21 +76,7 @@ export function resumoParametros(json) {
   }
 }
 
-/** Marca do orquestrador: engrenagem com fluxo + nome. claro = sobre a barra roxa. */
-export function Logo({ claro = false, grande = false }) {
-  const t = grande ? 44 : 30;
-  return (
-    <span className={`logo ${claro ? 'logo-claro' : ''} ${grande ? 'logo-grande' : ''}`}>
-      <svg width={t} height={t} viewBox="0 0 40 40" aria-hidden="true">
-        <circle cx="20" cy="20" r="18" fill="none" stroke="currentColor" strokeWidth="2.2" opacity=".55" />
-        <path d="M11 20h6l3-6 4 12 3-6h2" fill="none" stroke="currentColor" strokeWidth="2.6"
-              strokeLinecap="round" strokeLinejoin="round" />
-        <circle cx="31" cy="20" r="2.4" fill="currentColor" />
-      </svg>
-      <span className="logo-texto">orquestrador</span>
-    </span>
-  );
-}
+export { Logo } from "./marca.jsx";
 
 /** Página com trilha (casa » NOME) à esquerda e ações (busca, + Adicionar) à direita. */
 export function Pagina({ trilha, acoes, children }) {

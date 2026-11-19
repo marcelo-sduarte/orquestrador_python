@@ -1,4 +1,6 @@
-# Orquestrador de Robôs Python — V2 (FastAPI)
+<p align="center"><img src="front/public/favicon.svg" width="110" alt="PyKronos"></p>
+
+# PyKronos — Orquestrador de Robôs Python
 
 Orquestrador para robôs Python em Windows: **cadastra robôs, executa sob demanda, agenda, enfileira,
 acompanha logs ao vivo e guarda o histórico** — tudo a partir de uma interface web e de um banco SQL Server.
